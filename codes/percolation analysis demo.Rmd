@@ -1,0 +1,317 @@
+---
+title: "Percolation analysis"
+author: "Mihir Umarani"
+date: "2024-11-08"
+output: 
+  html_document:
+  fig_caption: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# **Rationale**
+
+The problem of pattern and scale is one of the central problems in ecology. Description of ecological patterns depends on the scale of observation. Moreover, the notion that the ecological patterns observed at a given spatial is scale is typically a result of mechanisms operating at different scales (Levin, 2002) makes it challenging to link the patterns to underlying processes. 
+
+Previous few analyses of rich empirical datasets of plant communities have analyzed the distribution of cluster size (refs). He and Hubbell (2006) first employed this approach on the detailed tree census carried on BCI. They first showed that the cluster size characteristics of species’ populations exhibited significant phase shift when plotted against population size and importantly, the smallest unit of measurement (spatial resolution). A critical observation was that the critical ‘percolation thresholds’ for the smallest spatial unit (spatial resolution) were species-specific, indicating that a species-specific mechanism of spatial dispersion explained their spatial distribution patterns. 
+
+Building on that, I aim to develop and employ statistical metrics built aroud the distributions of **contiguous clusters of individuals** and examine the scale-dependency of their patterns.
+
+
+
+
+```{r, echo=F,message=FALSE,warning=FALSE}
+
+library(tidyverse)
+library(RANN)
+library(furrr)
+library(magrittr)
+library(parallel)
+library(ggpubr)
+
+
+theme_set(theme_bw())
+theme_update(
+  panel.grid = element_blank(),
+  strip.background = element_rect(fill = 'orange')
+)
+
+
+generate_landscape = function(
+    Lx,
+    Ly,
+    quadrat_length,
+    rangepar, 
+    sillpar = 1, 
+    nuggetpar = 0.01,
+    seed
+) {
+  stopifnot(nuggetpar >= 0 & nuggetpar <= 1)
+  RFoptions(seed = seed)
+  
+  stress = 
+    RFsimulate(
+      RMgauss(
+        scale = rangepar + 1e-16,
+        var = 2 * sillpar * (1 - nuggetpar)
+      ) + 
+        RMtrend(mean = 0) + 
+        RMnugget(var = 2 * sillpar * nuggetpar),
+      x = seq(Lx / quadrat_length),
+      y = seq(Ly / quadrat_length)
+    )@data$variable1
+  
+  
+  stress=stress-min(stress)
+  stress=stress/max(stress)
+  
+  landscape = 
+    expand_grid(
+      y = seq(Ly / quadrat_length),
+      x = seq(Lx / quadrat_length)
+    ) %>%
+    mutate(
+      soiltype=stress
+    )
+  
+  return(as_tibble(landscape))
+}
+
+
+#Function to calculate the clusters
+clustmap=function(dat,Lx,Ly,gr,unit){#dat is a full grid of 0s and 1s.
+  
+  options(dplyr.summarise.inform = FALSE)
+
+   coords=expand.grid(x=1:Lx,y=1:Ly)
+  
+  dat=dat%>%
+    mutate(pres=1)%>%
+    right_join(coords,by=c('x','y'))%>%
+    replace_na(list(pres=0))
+  
+  
+  result=NULL    
+  
+  for(i in gr){
+    
+    cutx=unique(c(seq(0, Lx, i),Lx))
+    cuty=unique(c(seq(0, Ly, i),Ly))
+    
+    if(unit=='tree'){
+      
+      dat1=dat%>%
+        mutate(x = cut(x, cutx, labels = FALSE,include.lowest=TRUE),
+               y = cut(y, cuty, labels = FALSE,include.lowest=TRUE))%>%
+        group_by(x,y)%>%
+        summarize(pres=(sum(pres)))%>%
+        ungroup()%>%
+        pivot_wider(names_from = x,values_from = pres)%>%
+        select(-y)%>%
+        as.matrix()
+    }
+    
+    if(unit=='cell'){
+      
+      dat1=dat%>%
+        mutate(x = cut(x, cutx, labels = FALSE,include.lowest=TRUE),
+               y = cut(y, cuty, labels = FALSE,include.lowest=TRUE))%>%
+        group_by(x,y)%>%
+        summarize(pres=sign(sum(pres)))%>%
+        ungroup()%>%
+        pivot_wider(names_from = x,values_from = pres)%>%
+        select(-y)%>%
+        as.matrix()
+    }
+    
+      
+      clust=matrix(0,nrow=nrow(dat1),ncol=ncol(dat1))
+      
+      largest=0
+      
+      lbl=0:length(clust)
+      
+      for(y in seq(ncol(dat1))){
+        for(x in seq(nrow(dat1))){
+          
+          if((dat1[x,y]>0)){
+            
+            left=ifelse(length(clust[x,y-1])==0,0,clust[x,y-1])
+            above=ifelse(length(clust[x-1,y])==0,0,clust[x-1,y])
+            
+            if((left==0) & (above==0)){
+              
+              largest=largest+1
+              clust[x,y]=largest
+              lbl[(nrow(clust)*(y-1))+x]=largest
+              
+            }else{
+              
+              if((left!=0) & (above==0)){
+                
+                clust[x,y]=clust[x,y-1]
+                
+                lbl[(nrow(clust)*(y-1))+x]=lbl[(nrow(clust)*(y-2))+x]
+                
+              }else{
+                
+                if(left==0 & above!=0){
+                  
+                  clust[x,y]=clust[x-1,y]
+                  
+                  lbl[(nrow(clust)*(y-1))+x]=lbl[(nrow(clust)*(y-1))+x-1]
+                  
+                }else{
+                  
+                  newlab=min(left,above)
+                  
+                  lbl[which(lbl==left | lbl==above)]=newlab
+                  
+                  clust[x,y]=newlab
+                  
+                  clust[which(clust==max(left,above))]=newlab
+                  
+                }
+              }
+            }
+          }
+        }
+      }
+     
+
+      
+      clust2=clust%>%
+        as_tibble()%>%
+        mutate(y=1:nrow(clust))%>%
+        pivot_longer("1":as.character(ncol(clust)),names_to="x",values_to =    "cluster")%>%
+        mutate(x=as.numeric(x))%>%
+        filter(cluster > 0)
+      
+      
+      
+      result=bind_rows(
+        result,
+        tibble(
+          gr=i,
+          x=clust2$x,
+          y=clust2$y,
+          cluster=clust2$cluster
+        )
+      )
+       
+    }
+  
+  return(result)
+}
+
+
+get_clusdat=function(clustmap){
+  
+    grs=unique(clustmap$gr)
+    
+    res=list(length=length(grs))
+    
+    for(i in grs){
+      
+      dat=clustmap%>%
+          filter(gr==i && cluster > 0)%>%
+          as.data.frame()
+      
+      clusfreq=dat%>%count(cluster)%>%count(n)
+      
+      numclus=tibble(clus=unique(dat$cluster),id=1:length(unique(dat$cluster)))
+      
+      distmat=matrix(0,nrow=length(unique(dat$cluster)),ncol=length(unique(dat$cluster)))
+      
+      for(i1 in 1:(length(numclus$id)-1)){
+        for(i2 in (i+1):length(numclus$id)){
+          
+
+          cl1=dat[which(dat$cluster==numclus$clus[i1]),(1:2)]
+          
+          cl2=dat[which(dat$cluster==numclus$clus[i2]),(1:2)]
+          
+          dist=min(unlist(lapply(1:nrow(combs), function(x) sqrt((cl1[combs[x,1],1]-cl2[combs[x,2],1])^2 + (cl1[combs[x,1],2]-cl2[combs[x,2],2])^2))))
+          
+          distmat[i1,i2]=dist
+          
+        }
+      }
+      
+      res[[i]]=list(gr=i,freq=clusfreq,mat=distmat)
+      
+    }
+    
+    return(res)
+  
+}
+
+```
+
+A typical ecological setup of a population dynamics of single plant species can be described as a grid with a specified spatial resolution, or a grain _(a)_, where each cell could be described as either occupied/unoccupied (0/1) or in terms of number of individuals that are present within.
+
+```{r, echo=F,message=FALSE,warning=FALSE}
+
+dummydat=expand.grid(x=1:24,y=1:24)%>%
+        as_tibble()%>%
+        slice(sample(1:24^2,100))%>%
+        mutate(x=x,
+               y=y)
+
+
+par(pty="s")
+plot(dummydat$y~dummydat$x,pch=16,ylab = "",xlab="", xaxt='n',yaxt='n')
+grid(nx=24,ny=24,lty=1,lwd=1,col=1)
+
+```
+
+
+In the plot above, the grain size, let's say 1, indicating that this is the highest resolution of the observation an empiricist can make. Typically, this grain size would be 50 or 100 meters for a well sampled site. However, in case of BCI forest data, the grain is 1 m, which is incredible, because it allows one to analyse the impact of local processes and how they scale up.
+
+We can now observe the same data at different grain sizes and the dispersion patterns would differ as the grain size goes up. 
+
+```{r, echo=F,message=FALSE,warning=FALSE}
+#plot the data with grain size 2
+dummydat=expand.grid(x=1:24,y=1:24)%>%
+        as_tibble()%>%
+        slice(sample(1:24^2,150))%>%
+        mutate(x=x,
+               y=y)
+
+dummydat2=dummydat%>%
+          mutate(x=floor(x/2),
+                 y=floor(y/2))
+
+dummydat3=dummydat%>%
+          mutate(x=floor(x/4),
+                 y=floor(y/4))
+
+nf <- layout( matrix(c(1,2,3), ncol=3) )
+
+par(pty="s")
+plot(dummydat$y~dummydat$x,pch=16,ylab = "",xlab="", xaxt='n',yaxt='n')
+grid(nx=24,ny=24,lty=1,lwd=1,col=1)
+title("1 X 1")
+
+
+par(pty="s")
+plot(dummydat2$y~dummydat2$x,pch=16,ylab = "",xlab="", xaxt='n',yaxt='n')
+grid(nx=12,ny=12,lty=1,lwd=1,col=1)
+title("2 X 2")
+
+
+
+par(pty="s")
+plot(dummydat3$y~dummydat3$x,pch=16,ylab = "",xlab="", xaxt='n',yaxt='n')
+grid(nx=6,ny=6,lty=1,lwd=1,col=1)
+title("4 X 4")
+```
+Now let's see how the dispersion patterns look in terms of contiguous clusters. I define a cluster as a group of contiguous occupied cells that share an edge with the neighboring members. 
+```{r, echo=F,message=FALSE,warning=FALSE}
+#plot the data with grain size 2
+dummydat
+
+```
+
