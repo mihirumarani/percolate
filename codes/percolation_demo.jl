@@ -218,7 +218,7 @@ md"""
 # ╔═╡ 0f1a94fe-035f-4f06-b742-0cbc52a146cb
 begin
 
-	Random.seed!(15)
+	Random.seed!(17)
 
 	#Get result summaries for a single sample dataset
 
@@ -318,7 +318,7 @@ begin
 
 	p21=plot()
 
-	p21=@df clustsum1 plot(:size,:count,group=:grain,
+	p21=@df clustsum1 plot(:size,log.(:count),group=:grain,
 							title="Cluster size distribution",
 							xlab="Cluster size",
 							ylab="Frequency")
@@ -335,7 +335,7 @@ end
 
 # ╔═╡ e9350946-5c61-4100-84cb-1cc2edfb4fb2
 md"""
-This visual in the left plot is not very helpful. Mainly because,
+This visual in the left plot is not helpful at all. Mainly because,
 
 - Smallest grain size data mostly shows singleton clusters.
 - As the grain size gets bigger, we see a rapid onset of a single all-inclusive cluster.
@@ -380,54 +380,18 @@ begin
 	
 end
 
-# ╔═╡ 25bd8625-0ba0-4fca-8d29-82338416b814
-begin
-
-	Lx1=128
-	Ly1=128
-	abun1=round(Int64,Lx1*Ly1*0.1)
-	grains1=sort(union((2 .^(0:(Int(log(2,Lx1))-1))),[2,3,4,5,6,10,15,20,30,40]))
-
-	for i in 1:100
-
-		#set up randomized data
-		Random.seed!(i)
-		dat0=DataFrame(vec(collect(Iterators.product(1:Lx1,1:Ly1))))
-	    select!(dat0,"1"=>"x","2"=>"y")
-		dat0=dat0[sample(1:size(dat0)[1],abun1,replace=false),:]
-		dat0.pres .=1 
-
-		clustsum1=DataFrame()
-		clustsum2=DataFrame()
-		
-		for j in grains1
-	
-			dat1=zooms(dat0,Lx1,Ly1,j)
-			clusmap=get_clust(dat1,Lx1,Ly1)
-			clusmap=clusmap[clusmap.cluster .!=0,:]
-			r1,r2=clust_sum(clusmap,Lx1,Ly1,j)		
-			append!(clustsum1,DataFrame(grain=j,size=r1.size,count=r1.count))
-			r2vec=reshape(r2,length(r2))
-			r2vec=r2vec[r2vec .!= 0]
-			r2vec = r2vec ./ sqrt(Lx1^2 + Ly1^2)
-			append!(clustsum2,DataFrame(grain=i,dists=r2vec))
-		end
-
-		plot31=combine(groupby(clustsum1,:grain),:size => maximum, renamecols=false)
-		plot32=combine(groupby(clustsum2,:grain),:dists => mean,renamecols=false)
-
-		plot!(p23,plot(plot31.grain,plot31.size))
-		plot!(p24,plot(plot32.grain,plot32.dists))
-	end	
-	
-end
-
 # ╔═╡ 15a7563b-20ab-4d70-88be-8e8a247ea6ab
 md"""
 Observations:
-- Biggest cluster size increases rapidly with the grain size. This is expected for the random dispersion according to percolation theory.
-- Distances between clusters get shorter 
+- Biggest cluster size shows a characteristic sudden rise at a particular grain size. This is expected for the random dispersion according to percolation theory.
+- Distances between clusters get shorter basically linearly with the grain size.
 """
+
+# ╔═╡ 70480ba8-de8d-4c26-8bc5-f3444de7c771
+
+
+# ╔═╡ 587db598-470b-433c-a0bd-2d11ba5cc4bb
+
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -2220,23 +2184,24 @@ version = "1.4.1+1"
 
 # ╔═╡ Cell order:
 # ╠═d48d1475-c631-4af8-862d-8a7d0be8fca6
-# ╠═207e008d-46f2-4ba7-8144-4827971d0751
+# ╟─207e008d-46f2-4ba7-8144-4827971d0751
 # ╟─9a585dda-4ddf-4941-ba49-faa3cd67a0c9
 # ╟─9fc9c999-81f2-424f-8eaa-aa236e844b79
 # ╟─a2e08227-1408-43f8-8b42-2b71e2b46d5e
 # ╟─3747bfb5-d66e-42d1-8fe9-fffa57a02cc0
-# ╟─e1a04517-05f1-4a24-9c13-201d4946d113
+# ╠═e1a04517-05f1-4a24-9c13-201d4946d113
 # ╟─877ff571-a47b-4d49-a0a4-c828cd1da5c5
 # ╟─0f1a94fe-035f-4f06-b742-0cbc52a146cb
 # ╟─5f71eb53-04d6-48b9-9bb6-e801446e9d4b
 # ╟─994a5260-c003-4926-bac8-05e48dffdc7f
 # ╟─93c19e8e-7724-423b-baa9-feb511268117
 # ╟─b03d50e3-95e5-4b0a-9351-be1b3ef85da6
-# ╠═99959bc3-3f72-4313-ae40-713faac42b14
+# ╟─99959bc3-3f72-4313-ae40-713faac42b14
 # ╟─e9350946-5c61-4100-84cb-1cc2edfb4fb2
 # ╟─8c762a1f-1cc8-41c1-a590-5481f16db691
 # ╠═eaa095c5-cabc-4489-a9e0-6a80263b88f4
-# ╠═25bd8625-0ba0-4fca-8d29-82338416b814
 # ╠═15a7563b-20ab-4d70-88be-8e8a247ea6ab
+# ╠═70480ba8-de8d-4c26-8bc5-f3444de7c771
+# ╠═587db598-470b-433c-a0bd-2d11ba5cc4bb
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
